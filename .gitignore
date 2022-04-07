@@ -7,3 +7,6 @@ results_analysis/ERP_figs/
 results_analysis/multimodalfigs/
 results_analysis/unimodalfigs/
 unused/
+models/MSAA.m
+models/MSAA_T.m
+models/PCHA.m
