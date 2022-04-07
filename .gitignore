@@ -1,5 +1,6 @@
 *.mat
 *.png
+*.sh
 face_erps/
 model_fits/
 results_analysis/ERP_figs/
