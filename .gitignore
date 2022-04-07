@@ -1,0 +1,8 @@
+*.mat
+*.png
+face_erps/
+model_fits/
+results_analysis/ERP_figs/
+results_analysis/multimodalfigs/
+results_analysis/unimodalfigs/
+unused/

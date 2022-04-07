@@ -34,6 +34,8 @@ function [XC,S,C,nW,varexpl,dd]=PCHAW(X,noc,I,U,varargin)
 %
 % Copyright (C) Morten M???rup and Technical University of Denmark, 2010
 
+rng(0);
+
 warning('off','MATLAB:dispatcher:InexactMatch')
 if nargin>=5, opts = varargin{1}; else opts = struct; end
 conv_crit=mgetopt(opts,'conv_crit',10^-9);

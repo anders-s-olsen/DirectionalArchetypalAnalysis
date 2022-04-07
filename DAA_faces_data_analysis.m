@@ -1,113 +1,168 @@
 %% Load and structure data
-clear; clc; close all;
-addpath(genpath('/dtu-compute/macaroni/DAA/aso_code'))
-cd /dtu-compute/macaroni/DAA/aso_code
-load('data/face_erps10-Feb-2022.mat')
+clc; close all;
+load([code_dir,'/face_erps/face_erps31-Mar-2022.mat'])
 
-conditions = [1, 2, 3];
-X = data.preprocessed_normalized;
-%X = data.lowpass_filtered_scaled;
-%X = data.bandpass_filtered_normalized;
-%X = data.bandpass_filtered_scaled;
-
-%% Train model
-K = 4;
+labels = data.channel_labels([1,3]);
+datatypes = {'EEG','MEG','Multimodal'};
+numit_outer = 5;
+numit_inner = 100;
 I = data.t>0;
-% U = logical(ones(data.N,1));
+U = true(data.N,1);
+output_folder = [data_dir,'/model_fits/d'];
 
-%opts.gpu = false;
-d = DAA_MMMSWAA(X, K, I);
-
-%% Show training history
-figure(1); clf;
-    subplot(3,1,1);
-        semilogy(d.loss_history(1:end));title('Loss');
-        axis tight
-        ylim([d.loss_history(end), 0.995*d.loss_history(end)]);
-        xlabel('iteration');
-    subplot(3,1,2);
-        semilogy(d.muS_history(1:end));title('S step size')
-        axis tight
-        xlabel('iteration');
-    subplot(3,1,3);
-        semilogy(d.muC_history(1:end));title('C step size');
-        axis tight
-        xlabel('iteration');
-
-%%
-%%
-figure(2); clf;
-t = data.t*1e03;
-S = mean(d.S, 3);
-%S = std(d.S, 0, 3);
-S = reshape(S, [d.K, d.N, 3, 2]);
-
-colors = ['r','g','b'];
-condition_names = {'Famous','Unfamiliar','Scrambled'};
-h = zeros(3,1);
-for l=1:d.L
-subplot(2,d.L,l); hold on
-    bars = bar(t, S(:, :, l, 1)', 'stacked');
-    bars(1).BarWidth = 1;
-    axis tight
-    title([condition_names{l}, ' EEG']);
-    xlabel('Time [ms]')
-    ylabel('S-matrix');
-subplot(2,d.L,l+d.L); hold on
-    bars = bar(t, S(:, :, l, 2)', 'stacked');
-    bars(1).BarWidth = 1;
-    axis tight
-    title([condition_names{l}, ' MEG']);
-    xlabel('Time [ms]')
-    ylabel('S-matrix');
+% If run on DTU cluster
+if cl
+    configCluster
+    c = parcluster(dccClusterProfile());
+    c.AdditionalProperties.MemUsage = '2GB';
+    c.AdditionalProperties.ProcsPerNode = 0;
+    c.AdditionalProperties.WallTime = '12:00';
+    c.saveProfile
+    
+    profname = dccClusterProfile();
+    clust = parcluster(profname);
+    p=parpool(clust,20);
 end
 
-shg
+%% Train models
 
-%% Visualize XCs
-p = 1;
-subjects = 1:16;
-subject = subjects(p);
-load data/wakemanhenson_erps
+for datatype = 1:3 %loop over unimodal eeg, unimodal meg, multimodal
+    if ismember(datatype,[1,2]) && ~run_unimodal
+        continue
+    end
+    if datatype==3 && ~run_multimodal
+        continue
+    end
+    
+    if datatype ==1        %Unimodal eeg
+        X = data.preprocessed_Frob([1]);
+        Xs = data.preprocessed_normalized([1]);
+    elseif datatype ==2    %Unimodal meg (megmag)
+        X = data.preprocessed_Frob([3]);
+        Xs = data.preprocessed_normalized([3]);
+    elseif datatype ==3    %Multimodal
+        X = data.preprocessed_Frob([1,3]);
+        Xs = data.preprocessed_normalized([1,3]);
+    end
+    
+    % Preparation for Euclidean solution (MSAA_T)
+    if run_Euclidean_AA
+        subj = struct;sub = 1;
+        for p = 1:3:data.P*3
+            subj(p).X       = X{1}(:,:,sub,1)*1000;
+            subj(p).sX      = X{1}(:,I,sub,1)*1000;
+            subj(p+1).X     = X{1}(:,:,sub,2)*1000;
+            subj(p+1).sX    = X{1}(:,I,sub,2)*1000;
+            subj(p+2).X     = X{1}(:,:,sub,3)*1000;
+            subj(p+2).sX    = X{1}(:,I,sub,3)*1000;
+            sub = sub + 1;
+        end
+        opts.maxiter = 10000;
+        opts.heteroscedastic = false;
+        opts.init = 'notfurthestsum';
+    end
+    
+    mkdir([output_folder,datatypes{datatype}])
+    for K = Ks
+        for i_outer = 1:numit_outer
+            % initialize variables
+            dDAA_inner(numit_inner) = struct();
+            lossinnerDAA = nan(1,numit_inner);
+            if run_directional_clustering
+                dDAAhard_inner(numit_inner) = struct();
+                lossinnerDAAhard = nan(1,numit_inner);
+            end
+            if run_Euclidean_AA
+                dEU_inner(numit_inner) = struct();
+                lossinnerEU = nan(1,numit_inner);
+            end
+            if cl %use parfor instead
+                parfor i_inner = 1:numit_inner
+                    % Run models
+                    d = DAA_MMMSWAA(X,Xs,K,I,U,'Cinit','random','plot',false,'hard',false);
+                    dDAA_inner(i_inner).XC = d.XC;
+                    dDAA_inner(i_inner).S = d.S;
+                    dDAA_inner(i_inner).C = d.C;
+                    dDAA_inner(i_inner).loss = d.varexpl;
+                    lossinnerDAA(i_inner) = dDAA_inner(i_inner).loss;
+                    
+                    if run_directional_clustering
+                        d = DAA_MMMSWAA(X,Xs,K,I,U,'Cinit','random','plot',false,'hard',true);
+                        dDAAhard_inner(i_inner).XC = d.XC;
+                        dDAAhard_inner(i_inner).S = d.S;
+                        dDAAhard_inner(i_inner).C = d.C;
+                        dDAAhard_inner(i_inner).loss = d.varexpl;
+                        lossinnerDAAhard(i_inner) = dDAAhard_inner(i_inner).loss;
+                    end
+                    
+                    if ismember(datatype,[1,2])&&run_Euclidean_AA
+                        [results_subj,C,cost_fun,varexpl,time_taken]=DAA_MSAA_T(subj,K,opts);
+                        sXCEU = reshape([results_subj.sXC],data.D(datatype),K,data.P*3);
+                        SEU = reshape([results_subj.S],K,data.N,data.P*3);
+                        SSEEU = [results_subj.SSE];
+                        sub = 1;
+                        dEU_inner(i_inner).XC = mean(sXCEU,3);
+                        dEU_inner(i_inner).S = mean(SEU,3);
+                        dEU_inner(i_inner).C = C;
+                        dEU_inner(i_inner).loss = sum(SSEEU,2);
+                        lossinnerEU(i_inner) = dEU_inner(i_inner).loss;
+                    end
+                    
+                end %inner
+            else %cluster
+                for i_inner = 1:numit_inner
+                    % Run models
+                    d = DAA_MMMSWAA(X,Xs,K,I,U,'noflip',false,'nothing',false,'Cinit','random','plot',false,'hard',false);
+                    dDAA_inner(i_inner).XC = d.XC;
+                    dDAA_inner(i_inner).S = d.S;
+                    dDAA_inner(i_inner).C = d.C;
+                    dDAA_inner(i_inner).loss = d.varexpl;
+                    lossinnerDAA(i_inner) = dDAA_inner(i_inner).loss;
+                    
+                    if run_directional_clustering
+                        d = DAA_MMMSWAA(X,Xs,K,I,U,'noflip',false,'nothing',false,'Cinit','random','plot',false,'hard',true);
+                        dDAAhard_inner(i_inner).XC = d.XC;
+                        dDAAhard_inner(i_inner).S = d.S;
+                        dDAAhard_inner(i_inner).C = d.C;
+                        dDAAhard_inner(i_inner).loss = d.varexpl;
+                        lossinnerDAAhard(i_inner) = dDAAhard_inner(i_inner).loss;
+                    end
+                    
+                    if ismember(datatype,[1,2])&&run_Euclidean_AA
+                        [results_subj,C,cost_fun,varexpl,time_taken]=DAA_MSAA_T(subj,K,opts);
+                        sXCEU = reshape([results_subj.sXC],data.D(datatype),K,data.P*3);
+                        SEU = reshape([results_subj.S],K,data.N,data.P*3);
+                        SSEEU = [results_subj.SSE];
+                        sub = 1;
+                        dEU_inner(i_inner).XC = mean(sXCEU,3);
+                        dEU_inner(i_inner).S = mean(SEU,3);
+                        dEU_inner(i_inner).C = C;
+                        dEU_inner(i_inner).loss = sum(SSEEU,2);
+                        lossinnerEU(i_inner) = dEU_inner(i_inner).loss;
+                    end
+                    
+                end %inner
+            end %cluster
+            
+            [~,idxDAA] = min(lossinnerDAA);
+            d = dDAA_inner(idxDAA);
+            dd = dir([output_folder,num2str(datatypes),'/dDAA',num2str(K),'_*']);
+            parSave([output_folder,num2str(datatypes),'/dDAA',num2str(K),'_',num2str(length(dd))],d)
+            
+            if run_directional_clustering
+                [~,idxDAAhard] = min(lossinnerDAAhard);
+                d = dDAAhard_inner(idxDAAhard);
+                dd = dir([output_folder,num2str(datatypes),'/dDAAhard',num2str(K),'_*']);
+                parSave([output_folder,num2str(datatypes),'/dDAAhard',num2str(K),'_',num2str(length(dd))],d)
+            end
+            
+            if ismember(datatype,[1,2])&&run_Euclidean_AA
+                [~,idxEU] = min(lossinnerEU);
+                d = dEU_inner(idxEU);
+                dd = dir([output_folder,num2str(datatype),'/dEU',num2str(K),'_*']);
+                parSave([output_folder,num2str(datatype),'/dEU',num2str(K),'_',num2str(length(dd))],d)
+            end
+        end %outer loop
+    end %K
+end %datatypes
 
-XC = d.XC;
-XC{1} = mean(XC{1}, 3);
-XC{2} = mean(XC{2}, 3);
-
-for k = 1:d.K
-
-I = data{subject}.indchantype('EEG');
-pos = coor2D(data{subject}, I)';
-labels = char(chanlabels(data{subject}, I));
-y = XC{1}(:, k); %d.XC{1}(:, k, p);
-[topo, f] = spm_eeg_plotScalpData(y, pos, labels); %~
-close(f)
-
-figure(3);
-subplot(d.K,2,2*(k-1)+1);
-pcolor(topo)
-shading flat
-axis image
-axis off
-box off
-titlestr = [num2str(k), ' EEG'];
-title(titlestr)
-
-I = data{subject}.indchantype('MEGMAG');
-pos = coor2D(data{subject}, I)';
-labels = char(chanlabels(data{subject}, I));
-y = XC{2}(:, k); %d.XC{2}(:, k, p);
-[topo, f] = spm_eeg_plotScalpData(y, pos, labels); %~
-close(f)
-
-figure(3);
-subplot(d.K,2,2*(k-1)+2);
-pcolor(topo)
-shading flat
-axis image
-axis off
-box off
-titlestr = [num2str(k), ' MEG'];
-title(titlestr)
-
-end
