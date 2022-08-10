@@ -2,7 +2,7 @@
 
 This repository contains a set of Matlab functions to uncover microstates in functional neuroimaging data using directional archetypal analysis. The data may be multimodal, i.e., simultaneous EEG and MEG.
 
->[Combining electro- and magnetoencephalography data using directional archetypal analysis ](doi.org/10.3389/fnins.2022.911034) 
+>[Combining electro- and magnetoencephalography data using directional archetypal analysis ](https://www.frontiersin.org/articles/10.3389/fnins.2022.911034/full) 
 Anders S. Olsen, Rasmus MT Høegh, Jesper L Hinrich, Kristoffer H Madsen, Morten Mørup.
 
 Please follow the script DAA_main to view the general pipeline and further explore the scripts.
