@@ -77,6 +77,8 @@ function varargout = drawSphericalTriangle2(P1,P2,P3,varargin)
             facecolor = varargin{k+1};
         elseif strcmp(varargin{k},'CheatFactor')
             cheatfactor = varargin{k+1};
+        elseif strcmp(varargin{k},'ex')
+            ex = varargin{k+1};
         end
     end
     if ~exist('facecolor','var')
@@ -124,6 +126,7 @@ function varargout = drawSphericalTriangle2(P1,P2,P3,varargin)
     numsh = length(sh);
     
     % Anders edit start here
+    if ex==1
     fvc = surf2patch(sh(1));
     
     triangle = [st.p(1).cc',st.p(2).cc',st.p(3).cc'];
@@ -149,14 +152,18 @@ function varargout = drawSphericalTriangle2(P1,P2,P3,varargin)
     sh(numsh+1) = patch('Faces',fvc.faces(faceintriangle,:),'Vertices',cheatfactor*fvc.vertices,...
         'FaceColor','flat','FaceAlpha',0.2,'EdgeColor','none','LineStyle','none',...
         'FaceVertexCData',FaceVertexCData);
-    
-    cot = zeros(size(st.p(1).cc));
-%     k = 1;
-    for j=1:3 %lines
-        a = [j,rem(j,3)+1,rem(j+1,3)+1];
-        st.ad(j).pos = lineBetweenTwoPoints(st.p(a(1)).cc, st.p(a(2)).cc, m,'Outer',outer(a(3)));
-        cot = cot + st.p(a(1)).cc;
     end
+    cot = zeros(size(st.p(1).cc));
+    cot = cot + st.p(1).cc;
+%     k = 1;
+    st.ad(1).pos = lineBetweenTwoPoints(st.p(1).cc,st.p(2).cc,m,'Outer',outer(3));
+    st.ad(2).pos = lineBetweenTwoPoints(st.p(1).cc,st.p(3).cc,m,'Outer',outer(2));
+    st.ad(3).pos = lineBetweenTwoPoints(st.p(2).cc,st.p(3).cc,m,'Outer',outer(1));
+%     for j=1:3 %lines
+%         a = [j,rem(j,3)+1,rem(j+1,3)+1];
+%         st.ad(j).pos = lineBetweenTwoPoints(st.p(a(1)).cc, st.p(a(2)).cc, m,'Outer',outer(a(3)));
+%         cot = cot + st.p(a(1)).cc;
+%     end
     % plot the patch
 
     %Draw lines on shpere
@@ -166,7 +173,7 @@ function varargout = drawSphericalTriangle2(P1,P2,P3,varargin)
     sh(numsh+2) = lh(1);
     
     % turn camera to face patch
-    view(cot/norm(cot));
+%     view(cot/norm(cot));
 %     daspect([1 1 1])
     % some output processing
     nout = max(nargout,1);

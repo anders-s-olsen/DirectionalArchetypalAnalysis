@@ -1,3 +1,3 @@
-function parSave(fname, d)
-  save(fname, 'd')
+function parSave(fname, dopt)
+  save(fname, 'dopt')
 end

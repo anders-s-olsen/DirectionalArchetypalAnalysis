@@ -11,11 +11,11 @@
 # -- Error File --
 #BSUB -e DAAjob_err_%J.txt
 # -- estimated wall clock time (execution time): hh:mm -- 
-#BSUB -W 06:00 
+#BSUB -W 10:00 
 # -- Number of cores requested -- 
 #BSUB -n 1 
 # -- end of LSF options -- 
 
 # -- commands you want to execute -- 
 module load matlab/R2020a
-matlab -nodisplay -batch DAA_faces_data_analysis
+matlab -nodisplay -batch DAA_main

@@ -1,168 +1,144 @@
-%% Load and structure data
-clc; close all;
-load([code_dir,'/face_erps/face_erps31-Mar-2022.mat'])
+% Main function for running multisubject, multimodal Directional 
+% archetypal analysis, directional clustering, and/or Euclidean 
+% multisubject archetypal analysis. 
+%
+% "Combining Electro- and Magnetoencephalography using Directional
+% Archetypal Analysis" by AS Olsen, RMT Høegh, JL Hinrich, KH Madsen,
+% M Mørup (Front. Neurosci. 2022). doi.org/10.3389/fnins.2022.911034
+%
+% Anders S Olsen and Rasmus MT Høegh, 2019,2022
 
-labels = data.channel_labels([1,3]);
-datatypes = {'EEG','MEG','Multimodal'};
-numit_outer = 5;
-numit_inner = 100;
-I = data.t>0;
-U = true(data.N,1);
-output_folder = [data_dir,'/model_fits/d'];
+function DAA_faces_data_analysis(opts)
+%% Load latest dataset and structure data
+close all;
+derps         = dir([opts.code_dir,'/face_erps/face_erps*']);
+[~,idx]       = max(datetime({derps.date}));
+load([opts.code_dir,'/face_erps/',derps(idx).name])
+labels        = data.channel_labels([1,3]);
+output_folder = [opts.code_dir,'/model_fits/d'];
+I             = data.t>0;
+U             = true(data.N,1);
+dataD         = data.D;
+dataP         = data.P;
+dataN         = data.N;
 
 % If run on DTU cluster
-if cl
-    configCluster
-    c = parcluster(dccClusterProfile());
-    c.AdditionalProperties.MemUsage = '2GB';
-    c.AdditionalProperties.ProcsPerNode = 0;
-    c.AdditionalProperties.WallTime = '12:00';
-    c.saveProfile
-    
-    profname = dccClusterProfile();
-    clust = parcluster(profname);
-    p=parpool(clust,20);
+if opts.cl
+    DTU_cluster_setup(opts);
 end
 
 %% Train models
 
-for datatype = 1:3 %loop over unimodal eeg, unimodal meg, multimodal
-    if ismember(datatype,[1,2]) && ~run_unimodal
-        continue
-    end
-    if datatype==3 && ~run_multimodal
-        continue
-    end
+for datatype = opts.datatypes_to_run %loop over unimodal eeg, unimodal meg, multimodal, conditions concatenated, ind subjects
     
-    if datatype ==1        %Unimodal eeg
-        X = data.preprocessed_Frob([1]);
-        Xs = data.preprocessed_normalized([1]);
-    elseif datatype ==2    %Unimodal meg (megmag)
-        X = data.preprocessed_Frob([3]);
-        Xs = data.preprocessed_normalized([3]);
-    elseif datatype ==3    %Multimodal
-        X = data.preprocessed_Frob([1,3]);
-        Xs = data.preprocessed_normalized([1,3]);
-    end
-    
-    % Preparation for Euclidean solution (MSAA_T)
-    if run_Euclidean_AA
-        subj = struct;sub = 1;
-        for p = 1:3:data.P*3
-            subj(p).X       = X{1}(:,:,sub,1)*1000;
-            subj(p).sX      = X{1}(:,I,sub,1)*1000;
-            subj(p+1).X     = X{1}(:,:,sub,2)*1000;
-            subj(p+1).sX    = X{1}(:,I,sub,2)*1000;
-            subj(p+2).X     = X{1}(:,:,sub,3)*1000;
-            subj(p+2).sX    = X{1}(:,I,sub,3)*1000;
-            sub = sub + 1;
+    I2=I;U2=U; %applies to all other than CondCat
+    if strcmp(opts.datatypes{datatype},'EEG')        %Unimodal eeg
+        X     = data.preprocessed_Frob([1]);
+        Xs    = data.preprocessed_normalized([1]);
+    elseif strcmp(opts.datatypes{datatype},'MEG')    %Unimodal meg (megmag)
+        X     = data.preprocessed_Frob([3]);
+        Xs    = data.preprocessed_normalized([3]);
+    elseif strcmp(opts.datatypes{datatype},'Multimodal')    %Multimodal
+        X     = data.preprocessed_Frob([1,3]);
+        Xs    = data.preprocessed_normalized([1,3]);
+    elseif strcmp(opts.datatypes{datatype},'CondCat')    %Multimodal, conditions concatenated
+        X     = data.preprocessed_Frob([1,3]);
+        Xs    = data.preprocessed_normalized([1,3]);
+        
+        % concatenate across temporal dimension
+        for m = 1:2
+            X{m}  = cat(2,X{m}(:,:,:,1),X{m}(:,:,:,2),X{m}(:,:,:,3));
+            Xs{m} = cat(2,Xs{m}(:,:,:,1),Xs{m}(:,:,:,2),Xs{m}(:,:,:,3));
         end
-        opts.maxiter = 10000;
-        opts.heteroscedastic = false;
-        opts.init = 'notfurthestsum';
+        I2    = [I,I,I];
+        U2    = [U;U;U];
+    elseif strcmp(opts.datatypes{datatype},'ZeroCorr')
+        % This is run in a separate script
+        continue
     end
     
-    mkdir([output_folder,datatypes{datatype}])
-    for K = Ks
-        for i_outer = 1:numit_outer
-            % initialize variables
-            dDAA_inner(numit_inner) = struct();
-            lossinnerDAA = nan(1,numit_inner);
-            if run_directional_clustering
-                dDAAhard_inner(numit_inner) = struct();
-                lossinnerDAAhard = nan(1,numit_inner);
-            end
-            if run_Euclidean_AA
-                dEU_inner(numit_inner) = struct();
-                lossinnerEU = nan(1,numit_inner);
-            end
-            if cl %use parfor instead
-                parfor i_inner = 1:numit_inner
-                    % Run models
-                    d = DAA_MMMSWAA(X,Xs,K,I,U,'Cinit','random','plot',false,'hard',false);
-                    dDAA_inner(i_inner).XC = d.XC;
-                    dDAA_inner(i_inner).S = d.S;
-                    dDAA_inner(i_inner).C = d.C;
-                    dDAA_inner(i_inner).loss = d.varexpl;
-                    lossinnerDAA(i_inner) = dDAA_inner(i_inner).loss;
-                    
-                    if run_directional_clustering
-                        d = DAA_MMMSWAA(X,Xs,K,I,U,'Cinit','random','plot',false,'hard',true);
-                        dDAAhard_inner(i_inner).XC = d.XC;
-                        dDAAhard_inner(i_inner).S = d.S;
-                        dDAAhard_inner(i_inner).C = d.C;
-                        dDAAhard_inner(i_inner).loss = d.varexpl;
-                        lossinnerDAAhard(i_inner) = dDAAhard_inner(i_inner).loss;
-                    end
-                    
-                    if ismember(datatype,[1,2])&&run_Euclidean_AA
-                        [results_subj,C,cost_fun,varexpl,time_taken]=DAA_MSAA_T(subj,K,opts);
-                        sXCEU = reshape([results_subj.sXC],data.D(datatype),K,data.P*3);
-                        SEU = reshape([results_subj.S],K,data.N,data.P*3);
-                        SSEEU = [results_subj.SSE];
-                        sub = 1;
-                        dEU_inner(i_inner).XC = mean(sXCEU,3);
-                        dEU_inner(i_inner).S = mean(SEU,3);
-                        dEU_inner(i_inner).C = C;
-                        dEU_inner(i_inner).loss = sum(SSEEU,2);
-                        lossinnerEU(i_inner) = dEU_inner(i_inner).loss;
-                    end
-                    
-                end %inner
-            else %cluster
-                for i_inner = 1:numit_inner
-                    % Run models
-                    d = DAA_MMMSWAA(X,Xs,K,I,U,'noflip',false,'nothing',false,'Cinit','random','plot',false,'hard',false);
-                    dDAA_inner(i_inner).XC = d.XC;
-                    dDAA_inner(i_inner).S = d.S;
-                    dDAA_inner(i_inner).C = d.C;
-                    dDAA_inner(i_inner).loss = d.varexpl;
-                    lossinnerDAA(i_inner) = dDAA_inner(i_inner).loss;
-                    
-                    if run_directional_clustering
-                        d = DAA_MMMSWAA(X,Xs,K,I,U,'noflip',false,'nothing',false,'Cinit','random','plot',false,'hard',true);
-                        dDAAhard_inner(i_inner).XC = d.XC;
-                        dDAAhard_inner(i_inner).S = d.S;
-                        dDAAhard_inner(i_inner).C = d.C;
-                        dDAAhard_inner(i_inner).loss = d.varexpl;
-                        lossinnerDAAhard(i_inner) = dDAAhard_inner(i_inner).loss;
-                    end
-                    
-                    if ismember(datatype,[1,2])&&run_Euclidean_AA
-                        [results_subj,C,cost_fun,varexpl,time_taken]=DAA_MSAA_T(subj,K,opts);
-                        sXCEU = reshape([results_subj.sXC],data.D(datatype),K,data.P*3);
-                        SEU = reshape([results_subj.S],K,data.N,data.P*3);
-                        SSEEU = [results_subj.SSE];
-                        sub = 1;
-                        dEU_inner(i_inner).XC = mean(sXCEU,3);
-                        dEU_inner(i_inner).S = mean(SEU,3);
-                        dEU_inner(i_inner).C = C;
-                        dEU_inner(i_inner).loss = sum(SSEEU,2);
-                        lossinnerEU(i_inner) = dEU_inner(i_inner).loss;
-                    end
-                    
-                end %inner
-            end %cluster
+    for model = opts.models_to_run
+        if strcmp(opts.models{model},'EU') && (strcmp(opts.datatypes{datatype},'Multimodal')||strcmp(opts.datatypes{datatype},'CondCat'))
+            continue
+        end
+        
+        % Preparation for Euclidean solution (MSAA_T)
+        if strcmp(opts.models{model},'EU')
+            clearvars subj
             
-            [~,idxDAA] = min(lossinnerDAA);
-            d = dDAA_inner(idxDAA);
-            dd = dir([output_folder,num2str(datatypes),'/dDAA',num2str(K),'_*']);
-            parSave([output_folder,num2str(datatypes),'/dDAA',num2str(K),'_',num2str(length(dd))],d)
-            
-            if run_directional_clustering
-                [~,idxDAAhard] = min(lossinnerDAAhard);
-                d = dDAAhard_inner(idxDAAhard);
-                dd = dir([output_folder,num2str(datatypes),'/dDAAhard',num2str(K),'_*']);
-                parSave([output_folder,num2str(datatypes),'/dDAAhard',num2str(K),'_',num2str(length(dd))],d)
+            sub = 1;
+            for p = 1:3:data.P*3
+                EUsubj(p).X       = X{1}(:,:,sub,1)*1000;
+                EUsubj(p).sX      = X{1}(:,I2,sub,1)*1000;
+                EUsubj(p+1).X     = X{1}(:,:,sub,2)*1000;
+                EUsubj(p+1).sX    = X{1}(:,I2,sub,2)*1000;
+                EUsubj(p+2).X     = X{1}(:,:,sub,3)*1000;
+                EUsubj(p+2).sX    = X{1}(:,I2,sub,3)*1000;
+                sub = sub + 1;
             end
             
-            if ismember(datatype,[1,2])&&run_Euclidean_AA
-                [~,idxEU] = min(lossinnerEU);
-                d = dEU_inner(idxEU);
-                dd = dir([output_folder,num2str(datatype),'/dEU',num2str(K),'_*']);
-                parSave([output_folder,num2str(datatype),'/dEU',num2str(K),'_',num2str(length(dd))],d)
-            end
-        end %outer loop
-    end %K
+            optsEU.maxiter         = 10000;
+            optsEU.heteroscedastic = false;
+            optsEU.init            = 'notfurthestsum';
+            
+        end
+        
+        mkdir([output_folder,opts.datatypes{datatype}])
+        for K = opts.Ks
+            for i_outer = 1:opts.numit_outer
+                % initialize variables
+                clearvars d_inner
+                d_inner(opts.numit_inner) = struct();
+                lossinner                 = nan(1,opts.numit_inner);
+                
+                
+                % Run models
+                if strcmp(opts.models{model},'DAA')
+                    parfor (i_inner = 1:opts.numit_inner,opts.numWorkers)
+                        d = DAA_MMMSWAA(X,Xs,K,I2,U2,'Cinit','random','plot',false,'hard',false);
+                        XC{i_inner}        = d.XC;
+                        S{i_inner}         = d.S;
+                        C{i_inner}         = d.C;
+                        lossinner(i_inner) = d.varexpl;
+                    end
+                elseif strcmp(opts.models{model},'DAAhard')
+                    parfor (i_inner = 1:opts.numit_inner,opts.numWorkers)
+                        d = DAA_MMMSWAA(X,Xs,K,I2,U2,'Cinit','random','plot',false,'hard',true);
+                        XC{i_inner}        = d.XC;
+                        S{i_inner}         = d.S;
+                        C{i_inner}         = d.C;
+                        lossinner(i_inner) = d.varexpl;
+                    end
+                elseif strcmp(opts.models{model},'EU')
+                    parfor (i_inner = 1:opts.numit_inner,opts.numWorkers)
+                        [results_subj,CEU,cost_fun,varexpl,time_taken]=MSAA_T(EUsubj,K,opts);
+                        XC{i_inner}        = mean(reshape([results_subj.sXC],dataD(datatype),K,dataP*3),3);
+                        S{i_inner}         = mean(reshape([results_subj.S],K,dataN,dataP*3),3);
+                        C{i_inner}         = CEU;
+                        lossinner(i_inner) = sum([results_subj.SSE],2);
+                    end
+                end
+                
+                
+                
+                [~,idxmin] = min(lossinner);
+                dopt.XC    = XC{idxmin};
+                dopt.S     = S{idxmin};
+                dopt.C     = C{idxmin};
+                dopt.loss  = lossinner(idxmin);
+                dopt.K     = K;
+                dopt.N     = data.N;
+                dopt.t     = data.t;
+                dopt.L     = data.L;
+                dopt.I     = I;
+                dopt.U     = U;
+                dopt.P     = data.P;
+                
+                
+                dd = dir([output_folder,opts.datatypes{datatype},'/d',opts.models{model},num2str(K),'_*']);
+                parSave([output_folder,opts.datatypes{datatype},'/d',opts.models{model},num2str(K),'_',num2str(length(dd))],dopt)
+            end %outer loop
+        end %K
+    end %model
 end %datatypes
 

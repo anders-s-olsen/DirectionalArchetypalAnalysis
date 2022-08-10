@@ -7,43 +7,50 @@
 % A multi-subject, multi-modal human neuroimaging dataset and is available
 % here: https://openneuro.org/datasets/ds000117/versions/1.0.4
 %
-% Specifically, this script creates Figure 2 in the paper
 % "Combining Electro- and Magnetoencephalography using Directional
-% Archetypal Analysis" by AS Olsen, RMT Høegh et al (under review)
+% Archetypal Analysis" by AS Olsen, RMT Høegh, JL Hinrich, KH Madsen,
+% M Mørup (Front. Neurosci.). doi.org/10.3389/fnins.2022.911034
 %
+% Anders S Olsen and Rasmus MT Høegh, 2019,2022
+function DAA_visualize_example_ERP(opts)
 
-% - Anders S Olsen (2022)
-
-load([code_dir,'/data/face_erps31-Mar-2022.mat'])
+derps = dir([opts.code_dir,'/face_erps/face_erps*']);
+[~,idx] = max(datetime({derps.date}));
+load([opts.code_dir,'/face_erps/',derps(idx).name])
 
 close all
 colors = {  [134/256,   203/256,    146/256], ...
     [0,         0,          0],...
     [203/256,   134/256,    146/256]};
 
-load([code_dir,'/utility/grad'])
+load([opts.code_dir,'/utility/grad'])
 chosenelectrode = [3,nan,99];
 
-for m = [1,3]
-    figure('Position',[100,100,800,700])%,'Visible','off'
+for m = [1,3] %only EEG and MEGMAG
+    fig=figure('Position',[100,100,800,700])%,'Visible','off'
     tiledlayout(4,4,'TileSpacing','none','Padding','none')
     
     for s = 1:16
         
         nexttile
-        plot(data.t*1e3,squeeze(data.preprocessed_Frob{m}(chosenelectrode(m),:,s,1)),'color',colors{1},'LineWidth',1.5),hold on
-        plot(data.t*1e3,squeeze(data.preprocessed_Frob{m}(chosenelectrode(m),:,s,2)),'color',colors{2},'LineWidth',1.5)
-        plot(data.t*1e3,squeeze(data.preprocessed_Frob{m}(chosenelectrode(m),:,s,3)),'color',colors{3},'LineWidth',1.5),
-        line([0,0],[-15 15],'Color','k','LineWidth',1.5,'LineStyle','--')
-        if s==1
-            legend(data.condition_labels,'Location','NorthEast')
+        if m==1
+        dat = 10^6*squeeze(data.raw_data{m}(chosenelectrode(m),:,s,:) - mean(data.raw_data{m}(chosenelectrode(m),:,s,:),2));
+        elseif m==3
+            dat = 10^12*squeeze(data.raw_data{m}(chosenelectrode(m),:,s,:) - mean(data.raw_data{m}(chosenelectrode(m),:,s,:),2));
         end
-        %         title(['Subject ',num2str(s), ', ',data.channel_labels{m}{chosenelectrode(m)}])
-        axis([-100,800 -.06 .06])
+        plot(data.t*1e3,dat(:,1),'color',colors{1},'LineWidth',1.5),hold on
+        plot(data.t*1e3,dat(:,2),'color',colors{2},'LineWidth',1.5)
+        plot(data.t*1e3,dat(:,3),'color',colors{3},'LineWidth',1.5),
+        line([0,0],[-15 15],'Color','k','LineWidth',1.5,'LineStyle','--')
+        
+        xlim([-100 800])
         if ~ismember(s,[1:4:16])
             yticks([])
-        else
-            yticks([-0.05 0 0.05])
+        elseif m==1
+            ylabel('Field intensity [\muV]')
+        elseif m==3
+            ylabel('Field intensity [pT]')
+            yticks([-0.3 0 0.3])
         end
         if ismember(s,[13:16])
             xlabel('Time [ms]')
@@ -54,10 +61,26 @@ for m = [1,3]
         legend(dummyh,['Subject ',num2str(s)],'Location','northeast')
         legend boxoff
         box on
+        
+        if m==1
+            ylim([-13 13])
+        elseif m==3
+            ylim([-.4 .4])
+        end
+        
     end
     
     shg,pause(0.5)
-    exportgraphics(gcf,[code_dir,'/ERP_analysis/ERPmodality',num2str(m),'.png'],'Resolution',300)
+    exportgraphics(gcf,[opts.code_dir,'/ERP_analysis/ERPmodality',num2str(m),'_',date,'.png'],'Resolution',300)
     
 end
+% % extra fig for legend
+% figure
+% plot(data.t*1e3,squeeze(data.preprocessed_Frob{m}(chosenelectrode(m),:,s,1)),'color',colors{1},'LineWidth',1.5),hold on
+% plot(data.t*1e3,squeeze(data.preprocessed_Frob{m}(chosenelectrode(m),:,s,2)),'color',colors{2},'LineWidth',1.5)
+% plot(data.t*1e3,squeeze(data.preprocessed_Frob{m}(chosenelectrode(m),:,s,3)),'color',colors{3},'LineWidth',1.5),
+% 
+% legend(data.condition_labels,'Location','SouthEast')
+% exportgraphics(gcf,[opts.code_dir,'/ERP_analysis/ERPlegend.png'],'Resolution',300)
+
 return
