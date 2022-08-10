@@ -52,7 +52,7 @@ function d=DAA_MMMSWAA(X,Xs,K,I,U,varargin)
 % References
 % [1] Olsen AS, Høegh RMT, Hinrich JL, Madsen KH, Mørup M: "Combining
 % Electro- and Magnetoencephalography usign Directional Archetypal Analysis
-% (under review - Apr 2022)
+% (Front. Neurosci. 2022)
 %
 % Written by Anders S Olsen, Rasmus MT Høegh, and Morten Mørup
 %
